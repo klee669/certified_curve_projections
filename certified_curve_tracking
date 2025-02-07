@@ -1,0 +1,911 @@
+#using Oscar
+#using Oscar.StraightLinePrograms; const SLP = Oscar.StraightLinePrograms;
+using Nemo
+using AbstractAlgebra
+using LinearAlgebra
+using MultivariatePolynomials
+using Oscar
+using Oscar.StraightLinePrograms; const SLP = Oscar.StraightLinePrograms;
+
+####### functions for systems and intervals
+function jac_nsquare(system)
+    ring = parent(system[1]);
+    var = gens(ring);
+    mat = zero_matrix(ring,length(system),length(var));
+    for j in 1:length(system)
+        for i in 1:length(var)
+            d = derivative(system[j],var[i]);
+            if d == 0
+                mat[j,i] = zero(ring);
+            else
+                mat[j,i] = d;
+            end
+        end
+    end
+    Matrix(mat)
+end
+
+function jac(system)
+    ring = parent(system[1]);
+    var = gens(ring);
+    mat = zero_matrix(ring,length(system),length(system));
+    for j in 1:length(system)
+        for i in 1:length(system)
+            d = derivative(system[j],var[i]);
+            if d == 0
+                mat[j,i] = zero(ring);
+            else
+                mat[j,i] = d;
+            end
+        end
+    end
+    Matrix(mat)
+end
+
+function check_intersect_interval(int1,int2)
+    mid1 = midpoint(int1);
+    mid2 = midpoint(int2);
+
+    if mid1 < mid2
+        s_int = int1;
+        l_int = int2;
+    else
+        s_int = int2;
+        l_int = int1;
+    end
+
+    mid1 = midpoint(s_int);
+    mid2 = midpoint(l_int);
+    rad1 = radius(s_int);
+    rad2 = radius(l_int);
+    
+    if mid1 + rad1 < mid2 - rad2
+        return false
+    else
+        return true
+    end 
+end
+
+function check_intersect_complex_interval(int1,int2)
+    r_int1 = real(int1);
+    r_int2 = real(int2);
+    i_int1 = imag(int1);
+    i_int2 = imag(int2);
+    
+    check_intersect_interval(r_int1,r_int2) && check_intersect_interval(i_int1,i_int2)
+end
+
+
+function check_intersect_box(box1,box2)
+    n = length(box1);
+    if n != length(box2)
+        error("two input vectors must have the same length");
+    end
+    all(i -> check_intersect_complex_interval(box1[i],box2[i]), 1:n)
+end
+
+
+function convert_to_double_int(interval)
+    Base.convert(Float64,real(interval)) + Base.convert(Float64,imag(interval))*im
+end
+
+function convert_to_double_matrix(M)
+    sz = size(M);
+    nr = sz[1];
+    nc = sz[2];
+    result = zeros(Complex{Float64},nr,nc);
+    for j in 1:nr
+        for i in 1:nc
+            result[j,i] = convert_to_double_int(M[j,i]);
+        end
+    end
+    result
+end
+
+function convert_to_box_int(vec,ring)
+    n = length(vec);
+    result = [];
+    for i in 1:n
+        push!(result,ring(real(vec[i]),imag(vec[i])));
+    end
+    result
+end
+
+function max_int_norm(interval)
+    r = real(interval);
+    i = imag(interval);
+    rmax = convert(Float64, abs(Nemo.midpoint(r)) + Nemo.radius(r));
+    imax = convert(Float64, abs(Nemo.midpoint(r)) + Nemo.radius(r));
+    maximum([rmax, imax])
+end
+
+function max_norm(intvec)
+    sz = size(intvec);
+    nr = sz[1];
+    nc = sz[2];
+    abs_list = [];
+    for i in 1:nr
+        for j in 1:nc
+            push!(abs_list,max_int_norm(intvec[i,j]));
+        end
+    end 
+    maximum(abs_list)
+end
+
+
+function evaluate_matrix(m, vec)
+    ring = base_ring(m[1]);
+    sz = size(m);
+    nr = sz[1];
+    nc = sz[2];
+    mat = zero_matrix(ring,nr,nc);
+#    println(m)
+    for j in 1:nr
+        for i in 1:nc
+            mat[j,i] = AbstractAlgebra.evaluate(m[j,i],vec);
+        end
+    end
+    mat#matrix(Matrix(mat))
+end
+
+
+function jacobian_inverse(system,vec)
+    j = jac(system);
+    eval_jac = evaluate_matrix(j, vec);
+    Jinv, factor = pseudo_inv(eval_jac);
+    1/factor * Jinv
+end
+
+function midpoint_complex_int(int)
+    ring = parent(int);
+    ring(midpoint(real(int)),midpoint(imag(int)));
+end
+
+function midpoint_complex_box(int)
+    n = length(int);
+    ring = parent(int[1]);
+    result = zeros(ring, n);
+    for i in 1:n
+        result[i]=midpoint_complex_int(int[i]);
+    end
+    result
+end
+
+
+function convert_to_box_int(vec,ring)
+    n = length(vec);
+    result = [];
+    for i in 1:n
+        push!(result,ring(real(vec[i]),imag(vec[i])));
+    end
+    result
+end
+
+function convert_to_box_matrix(M,ring)
+    sz = size(M);
+    nr = sz[1];
+    nc = sz[2];
+    result = zero_matrix(ring,nr,nc);
+    for j in 1:nr
+        for i in 1:nc
+            result[j,i] = ring(real(M[j,i]),imag(M[j,i]));
+        end
+    end
+    Matrix(result)
+end
+
+
+
+
+
+
+
+
+####### functions for Krawczyk test
+
+function krawczyk_operator(system, p, r, A)
+    n = length(system);
+    j = jac(system);
+    CC = base_ring(system[1]);
+    mat = zeros(CC,n,1);
+    B = CC("+/- 1", "+/-1");
+    for i in 1:n
+        mat[i,1] = B;
+    end
+    id = identity_matrix(CC,n);
+    eval_sys = evaluate_matrix(system, p);
+    eval_jac = evaluate_matrix(j, vec(p+r*mat));
+    K = zeros(CC,n,1);
+    oper = (-1/r) * A * transpose(eval_sys) + (id - A* eval_jac)*matrix(mat);
+    for i in 1:n
+        K[i,1] = oper[i];
+    end
+    K
+end
+
+
+
+function krawczyk_test(system, point, r, A, rho)
+    K = krawczyk_operator(system,point,r, A);
+    max_norm(K) < rho
+end
+
+function refine_moore_box(f, x, r, A, rho)
+    y = x;
+    CR = parent(x[1]);
+    n = size(A)[1];
+    while krawczyk_test(f, y, r, A, rho) == false 
+        d = A * transpose(evaluate_matrix(f, y));
+        if max_norm(d) <= (1/64)*rho*r
+            r = (1/2)*r;
+        else
+            y = midpoint_complex_box(y-d[:,1]);
+        end
+        A = jacobian_inverse(f, y);
+    end
+    while 2*r <= 1 && krawczyk_test(f, x, 2*r, A, rho)
+        r = 2*r;
+    end
+
+    [y, r, A]
+end
+
+
+
+
+##### predictor parts
+function speed_vector(H, x, A)
+    ring = parent(H[1]);
+    d_var = gens(ring)[end];
+    n = length(H);
+
+    result = zeros(ring, 1, n);
+    for i = 1:n
+        result[i]=derivative(H[i],d_var);
+    end
+    result = evaluate_matrix(result, x);
+
+    midpoint_complex_box(-A*transpose(result))
+end
+
+
+function linear_predictor(H, v, x)
+
+    eR = parent(H[1]);
+    genseR = gens(eR);
+    η =  genseR[end];
+
+    n = size(v)[1];
+    result = zeros(eR,n);
+    for i = 1:n
+        result[i] = v[i]*η;
+    end
+    x+ result
+end
+
+function taylor_model(H, lp, tval,A,r)
+
+    n = length(H);
+    eR = parent(H[1]);
+    CC = coefficient_ring(eR);
+    η = gens(eR)[end];
+    lp = push!(lp,η);
+
+    elim_var = gens(eR);
+    elim_var[end] = tval+η;
+
+    eH = zeros(eR,1,n);
+    for i = 1:n
+        eH[i] = AbstractAlgebra.evaluate(H[i], elim_var);
+    end
+    ejac = jac(eH);
+    eHjac = zeros(eR, n,n);
+
+    mat = zeros(CC,n+1);
+    B = CC("+/- 1", "+/-1");
+    for i in 1:n
+        mat[i] = B;
+    end
+
+
+
+    for i = 1:n
+        eH[i] = AbstractAlgebra.evaluate(eH[i],lp);
+        for j = 1:n
+            eHjac[i,j] = AbstractAlgebra.evaluate(ejac[i,j], lp+r*mat);
+        end
+    end
+
+
+    id = identity_matrix(CC,n);
+    (-1/r) * A * matrix(transpose(eH)) + (id - A* matrix(eHjac))*matrix(mat[1:n])
+end
+
+
+function proceeding_step(h, CCi, n, tm, K)
+
+    while max_norm(K) > 7/8
+        h = 1/2 * h;
+        radii = h/2;
+        if abs(h) < 10^(-10)
+            error("h is too small!")
+        end
+
+        T = CCi("$radii +/- $radii");
+        input = zeros(CCi, n+1);
+        input[n+1] = T;
+        K = evaluate_matrix(tm, input);
+    end
+
+    h
+end
+
+function refine_step(H, Ft, x, r, A, h)
+
+    n = size(x)[1];
+    trunc_x = x[1:n-1];
+    trunc_x,r,A = refine_moore_box(Ft, trunc_x, r, A, 1/8);
+    x = push!(trunc_x, x[end]);
+    v = speed_vector(H,x,A);
+    h = (5/4)*h;
+    radii = h/2;
+
+    [x, r, A, v, h, radii]
+ 
+end
+
+
+function hermite_predictor(H, x, xprev, v, vprev, hprev)
+
+    eR = parent(H[1]);
+    genseR = gens(eR);
+    η =  genseR[end];
+
+    n = size(v)[1];
+    result = [];
+    for i = 1:n
+        result = push!(result, v[i]*η+ (3*v[i]/hprev-(v[i]-vprev[i])/hprev-3*(x[i]-xprev[i])/hprev^2)*(η^2)+
+        (2*v[i]/hprev^2-(v[i]-vprev[i])/hprev^2-2*(x[i]-xprev[i])/hprev^3)*(η^3));
+    end
+    x+ result 
+end
+
+
+
+function interval_svd(M)
+    ring = parent(M[1,1]);
+    M = convert_to_double_matrix(M);
+    u,s,vt = svd(M;full=true);
+    [convert_to_box_matrix(u,ring),convert_to_box_matrix(hcat(s),ring),convert_to_box_matrix(vt,ring)]
+end
+
+
+function origin_transformation(system, p)
+    ring = parent(system[1]);
+    gensR = gens(ring);
+    n = size(F)[2];
+
+    transformed_system = zeros(ring, 1, n);
+    for i = 1:n
+        transformed_system[i] = AbstractAlgebra.evaluate(system[i], gensR+p);
+    end
+transformed_system
+end
+
+function unitary_transformation(system, k_vec)
+    ring = parent(system[1]);
+    gensR = gens(ring);
+    n = size(system)[2];
+#    println(k_vec);
+    u,s,vt = interval_svd(transpose(kernel(k_vec)));
+    u_transform = u*gensR;
+
+    transformed_system = zeros(ring, 1, n);
+    for i = 1:n
+        transformed_system[i] = AbstractAlgebra.evaluate(system[i], u_transform);
+    end
+    [u,transformed_system*vt]
+end
+
+function system_transform(F,x)
+    ring = parent(F[1]);
+    CCi = base_ring(F[1]);
+    n = length(x);
+
+    k_prev = kernel(transpose(evaluate_matrix(jac_nsquare(F),x)));
+    t_F = origin_transformation(F, x);
+    J = transpose(evaluate_matrix(jac_nsquare(t_F), zeros(CCi,n)));
+    k = matrix(midpoint_complex_box(transpose(kernel(J))));
+
+    u,u_F = unitary_transformation(t_F, k);
+    elim_var = gens(ring);
+    elim_var[end] = ring(0);
+    eval_uF = zeros(ring,1,n-1);
+    for i = 1:n-1
+        eval_uF[i] = AbstractAlgebra.evaluate(u_F[i], elim_var);
+    end
+
+    [u, u_F, eval_uF]
+end
+
+function system_transform_with_prev(F,x,xprev)
+    ring = parent(F[1]);
+    CCi = base_ring(F[1]);
+    n = length(x);
+
+    k_prev = kernel(transpose(evaluate_matrix(jac_nsquare(F),x)));
+    t_F = origin_transformation(F, x);
+
+    J = transpose(evaluate_matrix(jac_nsquare(t_F), zeros(CCi,n)));
+    k = matrix(midpoint_complex_box(transpose(kernel(J))));
+
+    u,u_F = unitary_transformation(t_F, k);
+    elim_var = gens(ring);
+    elim_var[end] = ring(0);
+    eval_uF = zeros(ring,1,n-1);
+    for i = 1:n-1
+        eval_uF[i] = AbstractAlgebra.evaluate(u_F[i], elim_var);
+    end
+
+    [u, u_F, eval_uF]
+end
+
+function check_containment(I, x)
+    n = length(x);
+    all(i -> contains(real(I[i]),real(x[i])) && contains(imag(I[i]),imag(x[i])),1:n)
+end
+
+
+function track_curve(F, x, r)
+
+    ## initialization step
+    ring = parent(F[1]);
+    CCi = base_ring(F[1]);
+    n = length(x);
+    h = 1/2;
+    iter = 0;
+    init_x = x;
+
+    ## apply proceed 1-step of tracking using linear predictor to record data (x, v, h)
+
+    # transform the system to find the kernel vector easily.
+    u, u_F, eval_uF = system_transform(F,x);
+
+    # inverse jacobian for Krawczyk operator
+    A = jacobian_inverse(eval_uF, zeros(CCi, n));
+
+    # refine at a point x to find a reasonable radius r for an interval box
+    u_x, r, A, v, h, radii = refine_step(u_F, eval_uF, zeros(CCi,n), r, A, h);
+
+    X = linear_predictor(u_F, v, u_x[1:n-1]); # linear predictor
+    t = u_x[end];
+    tm = taylor_model(u_F, X, t,A, r); # taylor model
+
+    T = CCi("$radii +/- $radii");
+    input = zeros(CCi, n+1);
+    input[n+1] = T;
+    K = evaluate_matrix(tm, input); # Krawczyk_operator computed via taylor model
+
+    # proceed the tracking. it returns the time step h
+    h = proceeding_step(h, CCi, n, tm, K); 
+    u_x[end] = u_x[end]+h; 
+
+    # update x and record prev-data
+    xprev = x;
+    x = transpose(transpose(u_x)*Matrix(inv(matrix(u))))+x;
+    hprev = h;
+    vprev = v;
+    dx_prev = zeros(CCi,n);
+    dx= x-xprev;
+
+    iter = 0;
+    rev_count =0;
+    prev_count =0;
+    open("/Users/kisunlee/Downloads/certified_curve_tracking/graph10.tex", "w") do file
+        write(file,"\\begin{tikzpicture}[scale=3]\n");
+
+    # main loop
+    while iter < 500#check_containment(vec(Matrix(evaluate_matrix(hcat(X),input)))*inv(matrix(u))+x, init_x) == false && iter < 10 #
+        # transform the system 
+        u, u_F, eval_uF = system_transform_with_prev(F,x,xprev);
+
+        A = jacobian_inverse(eval_uF, zeros(CCi, n));
+        
+        u_x, r, A, v, h, radii = refine_step(u_F, eval_uF, zeros(CCi,n), r, A, h);
+            
+        xprev = transpose(transpose(x-xprev)*u);
+        X = hermite_predictor(u_F, u_x[1:n-1], xprev[1:n-1], v, vprev, hprev); # Hermite predictor
+        t = u_x[end];
+        tm = taylor_model(u_F, X, t,A, r);
+    
+        T = CCi("$radii +/- $radii");
+        input = zeros(CCi, n);
+        input[n] = T;
+        K = evaluate_matrix(tm, input);
+#        if iter > 200 && check_containment(vec(Matrix(evaluate_matrix(hcat(X),input)))*inv(matrix(u))+x, init_x) 
+#            println("stopping_criterion");
+#            break
+#        end
+        b = vec(Matrix(evaluate_matrix(hcat(X),input)))*inv(matrix(u))+x;
+#        b = vec(Matrix(evaluate_matrix(hcat(X),input)));
+#        b_1 = [real(convert_to_double_int(b[1]))-convert(Float64,radius(real(b[1]))),
+#        real(convert_to_double_int(b[2]))-convert(Float64,radius(real(b[2]))),
+#        real(convert_to_double_int(b[3]))-convert(Float64,radius(real(b[3])))]*inv(matrix(u))*matrix(u);#*inv(matrix(u)) + x;
+#        b_2 = [real(convert_to_double_int(b[1]))-convert(Float64,radius(real(b[1]))),
+#        real(convert_to_double_int(b[2]))+convert(Float64,radius(real(b[2]))),
+#        real(convert_to_double_int(b[3]))-convert(Float64,radius(real(b[3])))]*inv(matrix(u))*matrix(u);#*inv(matrix(u)) + x;
+#        b_3 = [real(convert_to_double_int(b[1]))+convert(Float64,radius(real(b[1]))),
+#        real(convert_to_double_int(b[2]))-convert(Float64,radius(real(b[2]))),
+#        real(convert_to_double_int(b[3]))-convert(Float64,radius(real(b[3])))]*inv(matrix(u))*matrix(u);#*inv(matrix(u)) + x;
+#        b_4 = [real(convert_to_double_int(b[1]))+convert(Float64,radius(real(b[1]))),
+#        real(convert_to_double_int(b[2]))+convert(Float64,radius(real(b[2]))),
+#        real(convert_to_double_int(b[3]))-convert(Float64,radius(real(b[3])))]*inv(matrix(u))*matrix(u);# + x;  
+#        b_left = map(i -> real(convert_to_double_int(i))-convert(Float64,radius(real(i))), b)*inv(matrix(u)) + x;
+#        b_right = map(i -> real(convert_to_double_int(i))+convert(Float64,radius(real(i))), b)*inv(matrix(u)) + x;
+#        println(b);
+       println(x);
+        
+        h = proceeding_step(h, CCi, n, tm, K);
+        u_x[end] = u_x[end]+h;
+
+        prev_count =rev_count;
+
+        if real(transpose(xprev)*u_x)<0
+            rev_count = rev_count+1;
+            println(rev_count);
+            u_x[end] = u_x[end] -2*h;
+            radii = -radii;
+            T = CCi("$radii +/- $radii");
+            input = zeros(CCi, n);
+            input[n] = T;
+            b = vec(Matrix(evaluate_matrix(hcat(X),input)))*inv(matrix(u))+x;
+        end
+
+
+        input = zeros(CCi, n);
+        input[n] = CCi(h);
+
+
+        xprev = x;
+        x = midpoint_complex_box(transpose(transpose(u_x)*Matrix(inv(matrix(u)))))+x;
+        println(iter);
+#=        if iter > 5
+#            write(file,"\\draw[color=blue,line width=.1mm] ($(convert(Float64,midpoint(real(b_1[1])))),$(convert(Float64,midpoint(real(b_1[2]))))) --($(convert(Float64,midpoint(real(b_2[1])))),$(convert(Float64,midpoint(real(b_2[2])))));\n")
+#            write(file,"\\draw[color=blue,line width=.1mm] ($(convert(Float64,midpoint(real(b_1[1])))),$(convert(Float64,midpoint(real(b_1[2]))))) --($(convert(Float64,midpoint(real(b_3[1])))),$(convert(Float64,midpoint(real(b_3[2])))));\n")
+#            write(file,"\\draw[color=blue,line width=.1mm] ($(convert(Float64,midpoint(real(b_2[1])))),$(convert(Float64,midpoint(real(b_2[2]))))) --($(convert(Float64,midpoint(real(b_4[1])))),$(convert(Float64,midpoint(real(b_4[2])))));\n")
+#            write(file,"\\draw[color=blue,line width=.1mm] ($(convert(Float64,midpoint(real(b_3[1])))),$(convert(Float64,midpoint(real(b_3[2]))))) --($(convert(Float64,midpoint(real(b_4[1])))),$(convert(Float64,midpoint(real(b_4[2])))));\n")
+            if prev_count != rev_count
+
+                write(file,"\\draw[color=blue,line width=.1mm] ($(real(convert_to_double_int(b[1]))-convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))-convert(Float64,radius(real(b[2]))))) --($(real(convert_to_double_int(b[1]))+convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))-convert(Float64,radius(real(b[2])))));\n")
+                write(file,"\\draw[color=blue,line width=.1mm] ($(real(convert_to_double_int(b[1]))-convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))-convert(Float64,radius(real(b[2]))))) --($(real(convert_to_double_int(b[1]))-convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))+convert(Float64,radius(real(b[2])))));\n")
+                write(file,"\\draw[color=blue,line width=.1mm] ($(real(convert_to_double_int(b[1]))-convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))+convert(Float64,radius(real(b[2]))))) --($(real(convert_to_double_int(b[1]))+convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))+convert(Float64,radius(real(b[2])))));\n")
+                write(file,"\\draw[color=blue,line width=.1mm] ($(real(convert_to_double_int(b[1]))+convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))-convert(Float64,radius(real(b[2]))))) --($(real(convert_to_double_int(b[1]))+convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))+convert(Float64,radius(real(b[2])))));\n")
+            else
+            write(file,"\\draw[color=blue,line width=.1mm] ($(real(convert_to_double_int(b[1]))-convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))-convert(Float64,radius(real(b[2]))))) --($(real(convert_to_double_int(b[1]))+convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))-convert(Float64,radius(real(b[2])))));\n")
+        write(file,"\\draw[color=blue,line width=.1mm] ($(real(convert_to_double_int(b[1]))-convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))-convert(Float64,radius(real(b[2]))))) --($(real(convert_to_double_int(b[1]))-convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))+convert(Float64,radius(real(b[2])))));\n")
+        write(file,"\\draw[color=blue,line width=.1mm] ($(real(convert_to_double_int(b[1]))-convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))+convert(Float64,radius(real(b[2]))))) --($(real(convert_to_double_int(b[1]))+convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))+convert(Float64,radius(real(b[2])))));\n")
+        write(file,"\\draw[color=blue,line width=.1mm] ($(real(convert_to_double_int(b[1]))+convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))-convert(Float64,radius(real(b[2]))))) --($(real(convert_to_double_int(b[1]))+convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))+convert(Float64,radius(real(b[2])))));\n")
+        end
+=#    
+    write(file,"\\draw[color=red,line width=.2mm] ($(real(convert_to_double_int(x[1]))),$(real(convert_to_double_int(x[2])))) --($(real(convert_to_double_int(xprev[1]))),$(real(convert_to_double_int(xprev[2]))));\n")
+end
+
+        dx_prev=dx;
+        dx=x-xprev;
+        hprev = h;
+        vprev = v;
+
+        #println(iter);
+        iter = iter+1;
+    end
+
+    write(file,"\\end{tikzpicture}");
+
+end
+    # final refinement
+#    u_x_end = u_x[end];
+#    u_x,r,A = refine_moore_box(eval_uF, u_x[1:n-1], r, A, 1/8);
+#    u_x = push!(u_x, u_x_end);
+#    x = midpoint_complex_box(transpose(transpose(u_x)*Matrix(inv(matrix(u)))))+x;
+
+    [x, r, A]
+end        
+
+
+
+function interval_svd2(M)
+    ring = parent(M[1,1]);
+    M = convert_to_double_matrix(M);
+    u,s,vt = svd(M;full=true);
+    [convert_to_box_matrix(u,ring),convert_to_box_matrix(hcat(s),ring),convert_to_box_matrix(vt,ring),convert_to_box_matrix(u',ring),convert_to_box_matrix(vt',ring)]
+end
+
+function unitary_transformation2(system, p)
+    ring = parent(system[1]);
+    gensR = gens(ring);
+    n = size(system)[2];
+#    println(k_vec);
+    M = evaluate_matrix(jac_nsquare(system),p);
+#    M = convert_to_double_matrix(M);
+
+    u,s,vt,ut,v = interval_svd2(M);
+    v_transform = vt*gensR;
+
+    transformed_system = zeros(ring, 1, n);
+    for i = 1:n
+        transformed_system[i] = AbstractAlgebra.evaluate(system[i], v_transform);
+    end
+    [vec(ut*transpose(transformed_system)),v,vt]
+end
+
+function track_curve2(F, x, r)
+
+    ## initialization step
+    ring = parent(F[1]);
+    CCi = base_ring(F[1]);
+    n = length(x);
+    h = 1/2;
+    iter = 0;
+
+
+    ## apply proceed 1-step of tracking using linear predictor to record data (x, v, h)
+
+    # transform the system to find the kernel vector easily.
+    t_F, vc, vt = unitary_transformation2(F,x);
+    t_x = vc*x;
+    elim_var = gens(ring);
+    elim_var[end] = ring(t_x[n]);
+    eval_uF = zeros(ring,1,n-1);
+    for i = 1:n-1
+        eval_uF[i] = AbstractAlgebra.evaluate(t_F[i], elim_var);
+    end
+
+    # inverse jacobian for Krawczyk operator
+    A = jacobian_inverse(t_F, t_x);
+
+    # refine at a point x to find a reasonable radius r for an interval box
+    t_x, r, A, v, h, radii = refine_step(t_F, eval_uF, t_x, r, A, h);
+    prevt_x = t_x;
+
+    X = linear_predictor(t_F, v, t_x[1:n-1]); # linear predictor
+#    t = t_x[end];
+    tm = taylor_model(t_F, X, t_x[end],A, r); # taylor model
+
+    T = CCi("$radii +/- $radii");
+    input = zeros(CCi, n);
+    input[n] = T;
+    K = evaluate_matrix(tm, input); # Krawczyk_operator computed via taylor model
+
+    # proceed the tracking. it returns the time step h
+    h = proceeding_step(h, CCi, n, tm, K); 
+    t_x[end] = t_x[end]+h; 
+    input = zeros(CCi, n);
+    input[n] = CCi(h);
+    t_x[1:n-1] = vec(Matrix(evaluate_matrix(matrix(X),input)))[1:n-1]+t_x[1:n-1];
+
+    # update x and record prev-data
+    xprev = x;
+    prevt_x = t_x;
+    secant = t_x;
+    prev_secant = secant;
+
+    hprev = h;
+    vprev = v;
+    vtprev = vt;
+    vcprev = vc;
+
+    iter = 0;
+    open("/Users/kisunlee/Downloads/certified_curve_tracking/graph2.tex", "w") do file
+        write(file,"\\begin{tikzpicture}[scale=1]\n");
+    
+    # main loop
+    while iter < 5000
+        # transform the system 
+        elim_var = gens(ring);
+        elim_var[end] = ring(t_x[n]);
+        eval_uF = zeros(ring,1,n-1);
+        for i = 1:n-1
+            eval_uF[i] = AbstractAlgebra.evaluate(t_F[i], elim_var);
+        end
+    
+        # inverse jacobian for Krawczyk operator
+        A = jacobian_inverse(t_F, t_x);
+    
+        # refine at a point x to find a reasonable radius r for an interval box
+        t_x, r, A, v, h, radii = refine_step(t_F, eval_uF, t_x, r, A, h);
+        
+
+        x = vt*t_x;
+            write(file,"\\draw[color=red,line width=.5mm] ($(real(convert_to_double_int(x[1]))),$(real(convert_to_double_int(x[2])))) --($(real(convert_to_double_int(xprev[1]))),$(real(convert_to_double_int(xprev[2]))));\n")
+println((real(convert_to_double_int(t_x[1])),real(convert_to_double_int(t_x[2]))));
+
+        # transform the system to find the kernel vector easily.
+        t_F, vc, vt = unitary_transformation2(F,x);
+#        if real(transpose(vtprev[:,end])*vt[:,end]) < 0
+#            vc = -vc;
+#            vt = -vt;
+#        end
+        t_x = vc*x;
+        prevt_x=t_x;
+
+        # inverse jacobian for Krawczyk operator
+        A = jacobian_inverse(t_F, t_x);
+    
+        xprev = transpose(vc*xprev);
+        
+        
+        prevt_x = t_x;
+
+        #        X = linear_predictor(t_F, v, t_x[1:n-1]); # linear predictor
+                X = hermite_predictor(t_F, t_x[1:n-1], xprev[1:n-1], v, vprev, hprev); # Hermite predictor
+        t = t_x[end];
+        tm = taylor_model(t_F, X, t,A, r);
+    
+        T = CCi("$radii +/- $radii");
+        input = zeros(CCi, n);
+        input[n] = T;
+        K = evaluate_matrix(tm, input);
+
+        h = proceeding_step(h, CCi, n, tm, K);
+        t_x[end] = t_x[end]+h;
+        input = zeros(CCi, n);
+        input[n] = CCi(h);
+        t_x[1:n-1] = vec(Matrix(evaluate_matrix(matrix(X),input)))[1:n-1];
+
+        vpp = vprev;
+        hpp = hprev;
+        xprev = x;
+        prev_secant = secant;
+
+        hprev = h;
+        vprev = v;
+        vtprev = vt;
+    vcprev = vc;
+
+    
+        #println(iter);
+        iter = iter+1;
+#        println(x[end]);
+    end
+    write(file,"\\end{tikzpicture}");
+
+end
+    # final refinement
+#    u_x_end = u_x[end];
+#    u_x,r,A = refine_moore_box(eval_uF, u_x[1:n-1], r, A, 1/8);
+#    u_x = push!(u_x, u_x_end);
+#    x = midpoint_complex_box(transpose(transpose(u_x)*Matrix(inv(matrix(u)))))+x;
+
+elim_var = gens(ring);
+elim_var[end] = ring(x[n]);
+eval_uF = zeros(ring,1,n-1);
+for i = 1:n-1
+    eval_uF[i] = AbstractAlgebra.evaluate(F[i], elim_var);
+end
+
+
+x[1] = x[1]-vec(Matrix(jacobian_inverse(eval_uF,x)*transpose(evaluate_matrix(eval_uF,x))))[1];
+solution_norm = max_norm(evaluate_matrix(F,x));
+while solution_norm > 1e-5
+    x[1] = x[1]-vec(Matrix(jacobian_inverse(eval_uF,x)*transpose(evaluate_matrix(eval_uF,x))))[1];
+    solution_norm = max_norm(evaluate_matrix(F,x));
+end    
+
+
+    [x, r, A]
+end        
+
+
+
+function track_curve_linear(F, x, r)
+
+    ## initialization step
+    ring = parent(F[1]);
+    CCi = base_ring(F[1]);
+    n = length(x);
+    h = 1/2;
+    iter = 0;
+
+
+    ## apply proceed 1-step of tracking using linear predictor to record data (x, v, h)
+
+    # transform the system to find the kernel vector easily.
+    elim_var = gens(ring);
+    elim_var[end] = ring(x[end]);
+    eval_F = zeros(ring,1,n-1);
+    for i = 1:n-1
+        eval_F[i] = AbstractAlgebra.evaluate(F[i], elim_var);
+    end
+
+    # inverse jacobian for Krawczyk operator
+    A = jacobian_inverse(eval_F, x);
+
+    # refine at a point x to find a reasonable radius r for an interval box
+    x, r, A, v, h, radii = refine_step(F, eval_F, x, r, A, h);
+
+
+    u, u_F, eval_uF = system_transform(F,x);
+    u_x = zeros(CCi,n);
+    A = jacobian_inverse(u_F, u_x);
+    v = speed_vector(u_F,u_x,A);
+
+    X = linear_predictor(u_F, v, u_x[1:n-1]); # linear predictor
+    t = u_x[end];
+    tm = taylor_model(u_F, X, t,A, r); # taylor model
+
+    T = CCi("$radii +/- $radii");
+    input = zeros(CCi, n+1);
+    input[n+1] = T;
+    K = evaluate_matrix(tm, input); # Krawczyk_operator computed via taylor model
+
+    # proceed the tracking. it returns the time step h
+    h = proceeding_step(h, CCi, n, tm, K); 
+    u_x[end] = u_x[end]+h; 
+
+    # update x and record prev-data
+    xprev = x;
+    x = transpose(transpose(u_x)*Matrix(inv(matrix(u))))+x;
+    hprev = h;
+    vprev = v;
+
+    iter = 0;
+    
+    # main loop
+    while iter < 100
+
+
+    # transform the system to find the kernel vector easily.
+    elim_var = gens(ring);
+    elim_var[end] = ring(x[end]);
+    eval_F = zeros(ring,1,n-1);
+    for i = 1:n-1
+        eval_F[i] = AbstractAlgebra.evaluate(F[i], elim_var);
+    end
+
+    # inverse jacobian for Krawczyk operator
+    A = jacobian_inverse(eval_F, x);
+
+    # refine at a point x to find a reasonable radius r for an interval box
+    x, r, A, v, h, radii = refine_step(F, eval_F, x, r, A, h);
+    u, u_F, eval_uF = system_transform(F,x);
+    u_x = zeros(CCi,n);
+    A = jacobian_inverse(u_F, u_x);
+    v = speed_vector(u_F,u_x,A);
+
+    X = linear_predictor(u_F, v, u_x[1:n-1]); # linear predictor
+    t = u_x[end];
+    tm = taylor_model(u_F, X, t,A, r); # taylor model
+
+    T = CCi("$radii +/- $radii");
+    input = zeros(CCi, n+1);
+    input[n+1] = T;
+    K = evaluate_matrix(tm, input); # Krawczyk_operator computed via taylor model
+
+    # proceed the tracking. it returns the time step h
+    h = proceeding_step(h, CCi, n, tm, K); 
+    u_x[end] = u_x[end]+h; 
+
+    # update x and record prev-data
+    xprev = x;
+    x = transpose(transpose(u_x)*Matrix(inv(matrix(u))))+x;
+    hprev = h;
+    vprev = v;
+
+
+    #        println(x);
+        println("\\draw[color=red,line width=.5mm] ",(real(convert_to_double_int(x[1])),real(convert_to_double_int(x[2]))),"--",(real(convert_to_double_int(xprev[1])),real(convert_to_double_int(xprev[2]))),";");
+
+        #println(iter);
+        iter = iter+1;
+    end
+
+    # final refinement
+#    u_x_end = u_x[end];
+#    u_x,r,A = refine_moore_box(eval_uF, u_x[1:n-1], r, A, 1/8);
+#    u_x = push!(u_x, u_x_end);
+#    x = midpoint_complex_box(transpose(transpose(u_x)*Matrix(inv(matrix(u)))))+x;
+
+    [x, r, A]
+end        
+
+
