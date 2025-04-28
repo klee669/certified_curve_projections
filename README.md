@@ -102,7 +102,7 @@ Each example shows how to set up the system, point, and run `track_curve` to gen
 
 ## Requirements
 
-* Julia 1.6+
+* Julia 1.10+
 * Packages:
   - `Nemo.jl`
   - `AbstractAlgebra.jl`
@@ -113,7 +113,7 @@ Each example shows how to set up the system, point, and run `track_curve` to gen
 
 ## Contact
 
-For questions or issues, feel free to open an issue on GitHub or contact Kisun Lee.
+For questions or issues, feel free to open an issue on GitHub or contact Kisun Lee (kisunl@clemson.edu).
 
 ---
 
