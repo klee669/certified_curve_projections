@@ -1,6 +1,6 @@
 # Certified Curve Tracking
 This is a Git repo for the paper "Certified algebraic curve projections by path tracking" by Burr, Byrd and Lee
-Certified numerical tracking of solution curves for polynomial systems, with interval arithmetic validation and LaTeX/TikZ output.
+Certified numerical tracking of regular curves given by a polynomial system, with interval arithmetic validation and LaTeX/TikZ output.
 
 ## How to run codes
 
@@ -12,7 +12,7 @@ Certified numerical tracking of solution curves for polynomial systems, with int
 include("certified_curve_tracking.jl")
 ```
 
-* Prepare your polynomial system `F`, initial point `p`, and initial radius `r`, following the examples below.
+* Prepare your polynomial system `F`, initial point `p`, and initial radius for the interval box `r`, following the examples below.
 * Run the tracking with the function `track_curve`.
 
 ## Running an Example
@@ -34,8 +34,6 @@ x, r, A = track_curve(F, p, 0.1, 600, "~/Documents/GitHub/certified_curve_projec
 
 This generates a TikZ `.tex` file under the specified path, visualizing the certified curve.
 
-* The `.tex` file can be compiled using any LaTeX engine that supports TikZ.
-
 ## Input format
 
 There is no separate input file required. You manually define the following inside Julia:
@@ -48,12 +46,13 @@ There is no separate input file required. You manually define the following insi
 R, (x,y,z) = CCi["x","y","z"]
 ```
 
-* The system `F` must be given as a Julia array using `hcat([...])`.
+* The system `F` must be given as a Julia array in the type of `Matrix{AbstractAlgebra.Generic.MPoly{ComplexFieldElem}}`. If it is a one-equation system, then use `hcat([...])`.
 
 Example:
 
 ```julia
-F = hcat([-z - x^3 + 2.7x, y^2 - 2 + z])
+F = [-z - x^3 + 2.7x y^2 - 2 + z]
+F = hcat([-z - x^3 + 2.7x])
 ```
 
 ### Points
@@ -72,7 +71,7 @@ p = [CCi(2.3947), CCi(3.17), CCi(-8.04)]
 
 * A `.tex` file is generated automatically by `track_curve`.
 * It contains:
-  - Red lines connecting certified midpoints (solution path)
+  - Red lines connecting certified midpoints (curve approximation)
   - (Optional) Blue boxes representing the certified tubular neighborhoods.
 
 Example snippet from output:
@@ -81,8 +80,6 @@ Example snippet from output:
 \draw[color=red,line width=.2mm] (x1,y1) -- (x2,y2);
 \draw[color=blue,line width=.1mm] (box edges)
 ```
-
-* You can compile this `.tex` file using `pdflatex` or Overleaf to get a high-quality figure.
 
 ## Examples included
 
@@ -98,7 +95,6 @@ Each example shows how to set up the system, point, and run `track_curve` to gen
 * Tracking is designed for **codimension-1** curves (systems where the Jacobian drops rank by 1).
 * Interval radius `r` is automatically adjusted during tracking.
 * Certification of steps is performed by Krawczyk operator-based method.
-* Works both in low and moderately high precision (default is standard `ComplexField`).
 
 ## Requirements
 
