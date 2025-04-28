@@ -3,7 +3,7 @@ include("certified_curve_tracking.jl")
 # Figure 3 example
 CCi = ComplexField()
 R, (x,y,z) = CCi["x","y","z"]
-F =hcat([-z-x^3+2.7*x y^2-2+z])
+F =[-z-x^3+2.7*x y^2-2+z]
 p = [CCi(2.3947),CCi(3.17),CCi(-8.04)]
 
 x,r,A=track_curve(F,p,.1,600,"~/Documents/GitHub/certified_curve_projections/small_example";
@@ -42,7 +42,7 @@ x,r,A=track_curve(F,p,.1,500,"~/Documents/GitHub/certified_curve_projections/MGG
 # Figure 5 example
 CCi = ComplexField()
 R, (x,y,z) = CCi["x","y","z"]
-F =hcat([x+z^5-1.3*z^3 y-z^3+z])
+F = [x+z^5-1.3*z^3 y-z^3+z]
 p = [CCi(1.81),CCi(-1.34),CCi(-1.4)]
 
 x,r,A=track_curve(F,p,.1,300,"~/Documents/GitHub/certified_curve_projections/projected_curve"; figure_scale=3)
