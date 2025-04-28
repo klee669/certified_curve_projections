@@ -52,7 +52,7 @@ Example:
 
 ```julia
 F = [-z - x^3 + 2.7x y^2 - 2 + z]
-F = hcat([-z - x^3 + 2.7x])
+F = hcat([-y - x^3 + 2.7x]) # a plane curve in 2D defined by a single-equation.
 ```
 
 ### Points
