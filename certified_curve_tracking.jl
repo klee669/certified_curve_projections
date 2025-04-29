@@ -532,8 +532,9 @@ function track_curve(F, x, r, max_iter, file_name; show_tubular_neighborhood=fal
                     write(file,"\\draw[color=blue,line width=$(box_thickness)mm] ($(real(convert_to_double_int(b[1]))+convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))-convert(Float64,radius(real(b[2]))))) --($(real(convert_to_double_int(b[1]))+convert(Float64,radius(real(b[1])))),$(real(convert_to_double_int(b[2]))+convert(Float64,radius(real(b[2])))));\n")
                 end
             end
-
-            write(file,"\\draw[color=red,line width=$(line_thickness)mm] ($(real(convert_to_double_int(x[1]))),$(real(convert_to_double_int(x[2])))) --($(real(convert_to_double_int(xprev[1]))),$(real(convert_to_double_int(xprev[2]))));\n")
+            if iter > 5
+                write(file,"\\draw[color=red,line width=$(line_thickness)mm] ($(real(convert_to_double_int(x[1]))),$(real(convert_to_double_int(x[2])))) --($(real(convert_to_double_int(xprev[1]))),$(real(convert_to_double_int(xprev[2]))));\n")
+            end
 
             dx_prev = dx
             dx = x - xprev
